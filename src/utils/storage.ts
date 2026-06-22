@@ -1,45 +1,53 @@
 import type { User, Booking } from '../types';
 import { ADMIN_ACCOUNT } from '../data/constants';
+import { API_BASE } from '../config';
 
-const USERS_KEY = 'lab_users';
-const BOOKINGS_KEY = 'lab_bookings';
 const CURRENT_USER_KEY = 'lab_current_user';
+
+async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const opts: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API_BASE + path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Network error' }));
+    throw new Error(err.error || 'Server error');
+  }
+  return res.json();
+}
 
 // ── Users ────────────────────────────────────────────────────────────────────
 
-function readUsers(): User[] {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]'); }
-  catch { return []; }
-}
-
-function writeUsers(users: User[]) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
 export async function getUsers(): Promise<User[]> {
-  return [...readUsers(), ADMIN_ACCOUNT];
+  return []; // admin listing not supported via Feishu
 }
 
 export async function addUser(user: User) {
-  const users = readUsers();
-  if (users.some((u) => u.employeeId === user.employeeId) || user.employeeId === ADMIN_ACCOUNT.employeeId) {
-    throw new Error('该工号已被注册');
-  }
-  users.push(user);
-  writeUsers(users);
+  if (user.employeeId === ADMIN_ACCOUNT.employeeId) throw new Error('该工号已被注册');
+  const existing = await findUserByEmployeeId(user.employeeId);
+  if (existing) throw new Error('该工号已被注册');
+  return api('POST', '/users', {
+    employeeId: user.employeeId,
+    name: user.name,
+    pi: user.pi,
+    passwordHash: user.passwordHash,
+  });
 }
 
-export async function deleteUser(id: string) {
-  const users = readUsers().filter((u) => u.id !== id);
-  writeUsers(users);
+export async function deleteUser(_id: string) {
+  // not used
 }
 
 export async function findUserByEmployeeId(employeeId: string): Promise<User | undefined> {
   if (employeeId === ADMIN_ACCOUNT.employeeId) return ADMIN_ACCOUNT;
-  return readUsers().find((u) => u.employeeId === employeeId);
+  return api<User | null>('GET', '/users?employeeId=' + encodeURIComponent(employeeId)).then(
+    (u) => u || undefined,
+  );
 }
 
-// ── Auth (localStorage for session) ─────────────────────────────────────────
+// ── Auth (localStorage session) ──────────────────────────────────────────────
 
 export function getCurrentUser(): User | null {
   const raw = localStorage.getItem(CURRENT_USER_KEY);
@@ -53,44 +61,37 @@ export function setCurrentUser(user: User | null) {
 
 // ── Bookings ─────────────────────────────────────────────────────────────────
 
-function readBookings(): Booking[] {
-  try { return JSON.parse(localStorage.getItem(BOOKINGS_KEY) || '[]'); }
-  catch { return []; }
-}
-
-function writeBookings(bookings: Booking[]) {
-  localStorage.setItem(BOOKINGS_KEY, JSON.stringify(bookings));
-}
-
 export async function getBookings(): Promise<Booking[]> {
-  return readBookings();
+  const data = await api<Array<Booking & { status?: string }>>('GET', '/bookings');
+  return (data || []).filter((b) => b.status !== '已取消');
 }
 
 export async function addBooking(booking: Booking) {
-  const bookings = readBookings();
-  bookings.push(booking);
-  writeBookings(bookings);
+  return api<{ success: boolean; id: string }>('POST', '/bookings', booking);
 }
 
 export async function addBookings(newBookings: Booking[]) {
-  const bookings = readBookings();
-  bookings.push(...newBookings);
-  writeBookings(bookings);
+  for (const b of newBookings) await addBooking(b);
 }
 
 export async function cancelBooking(id: string) {
-  const bookings = readBookings().filter((b) => b.id !== id);
-  writeBookings(bookings);
+  return api('PATCH', '/bookings?id=' + encodeURIComponent(id));
 }
 
 export async function cancelBookingsBySubSlot(
   labId: string, instrumentId: string, subSlotId: string, userId: string,
 ) {
-  const bookings = readBookings().filter(
-    (b) => !(b.labId === labId && b.instrumentId === instrumentId
-      && b.subSlotId === subSlotId && b.userId === userId)
-  );
-  writeBookings(bookings);
+  const all = await getBookings();
+  for (const b of all) {
+    if (
+      b.labId === labId &&
+      b.instrumentId === instrumentId &&
+      b.subSlotId === subSlotId &&
+      b.userId === userId
+    ) {
+      await cancelBooking(b.id);
+    }
+  }
 }
 
 // ── Queries ──────────────────────────────────────────────────────────────────
@@ -113,8 +114,12 @@ export async function isDayTaken(
 ): Promise<Booking | undefined> {
   const all = await getBookings();
   return all.find(
-    (b) => b.labId === labId && b.instrumentId === instrumentId
-      && b.subSlotId === subSlotId && b.date === date && b.bookingType === 'day'
+    (b) =>
+      b.labId === labId &&
+      b.instrumentId === instrumentId &&
+      b.subSlotId === subSlotId &&
+      b.date === date &&
+      b.bookingType === 'day',
   );
 }
 
@@ -123,8 +128,11 @@ export async function getSubSlotBookings(
 ): Promise<Booking[]> {
   const all = await getBookings();
   return all.filter(
-    (b) => b.labId === labId && b.instrumentId === instrumentId
-      && b.subSlotId === subSlotId && b.bookingType === 'day'
+    (b) =>
+      b.labId === labId &&
+      b.instrumentId === instrumentId &&
+      b.subSlotId === subSlotId &&
+      b.bookingType === 'day',
   );
 }
 
