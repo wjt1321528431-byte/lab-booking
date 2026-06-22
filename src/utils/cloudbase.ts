@@ -38,6 +38,10 @@ function ensureAuth(): Promise<void> {
   return authReady;
 }
 
+export function preWarm() {
+  ensureAuth().catch((e) => console.warn('[CloudBase] preWarm auth failed (will retry on demand):', e?.message || e));
+}
+
 async function ready() {
   await ensureAuth();
   return db;
