@@ -1,39 +1,29 @@
 import type { User, Booking } from '../types';
 import { ADMIN_ACCOUNT } from '../data/constants';
-import { API_BASE } from '../config';
+import {
+  dbGetUsers,
+  dbAddUser,
+  dbFindUserByEmployeeId,
+  dbGetBookings,
+  dbAddBooking,
+  dbCancelBooking,
+  dbCancelBookingsBySubSlot,
+} from './cloudbase';
 
 const CURRENT_USER_KEY = 'lab_current_user';
-
-async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
-  const opts: RequestInit = {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-  };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(API_BASE + path, opts);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Network error' }));
-    throw new Error(err.error || 'Server error');
-  }
-  return res.json();
-}
 
 // ── Users ────────────────────────────────────────────────────────────────────
 
 export async function getUsers(): Promise<User[]> {
-  return []; // admin listing not supported via Feishu
+  const list = await dbGetUsers();
+  return [...list] as unknown as User[];
 }
 
 export async function addUser(user: User) {
   if (user.employeeId === ADMIN_ACCOUNT.employeeId) throw new Error('该工号已被注册');
   const existing = await findUserByEmployeeId(user.employeeId);
   if (existing) throw new Error('该工号已被注册');
-  return api('POST', '/users', {
-    employeeId: user.employeeId,
-    name: user.name,
-    pi: user.pi,
-    passwordHash: user.passwordHash,
-  });
+  await dbAddUser(user as unknown as Record<string, unknown>);
 }
 
 export async function deleteUser(_id: string) {
@@ -42,9 +32,8 @@ export async function deleteUser(_id: string) {
 
 export async function findUserByEmployeeId(employeeId: string): Promise<User | undefined> {
   if (employeeId === ADMIN_ACCOUNT.employeeId) return ADMIN_ACCOUNT;
-  return api<User | null>('GET', '/users?employeeId=' + encodeURIComponent(employeeId)).then(
-    (u) => u || undefined,
-  );
+  const u = await dbFindUserByEmployeeId(employeeId);
+  return u as unknown as User | undefined;
 }
 
 // ── Auth (localStorage session) ──────────────────────────────────────────────
@@ -62,36 +51,29 @@ export function setCurrentUser(user: User | null) {
 // ── Bookings ─────────────────────────────────────────────────────────────────
 
 export async function getBookings(): Promise<Booking[]> {
-  const data = await api<Array<Booking & { status?: string }>>('GET', '/bookings');
-  return (data || []).filter((b) => b.status !== '已取消');
+  const list = await dbGetBookings();
+  return [...list] as unknown as Booking[];
 }
 
 export async function addBooking(booking: Booking) {
-  return api<{ success: boolean; id: string }>('POST', '/bookings', booking);
+  await dbAddBooking(booking as unknown as Record<string, unknown>);
+  return { success: true, id: booking.id };
 }
 
 export async function addBookings(newBookings: Booking[]) {
-  for (const b of newBookings) await addBooking(b);
+  for (const b of newBookings) {
+    await dbAddBooking(b as unknown as Record<string, unknown>);
+  }
 }
 
 export async function cancelBooking(id: string) {
-  return api('PATCH', '/bookings?id=' + encodeURIComponent(id));
+  await dbCancelBooking(id);
 }
 
 export async function cancelBookingsBySubSlot(
   labId: string, instrumentId: string, subSlotId: string, userId: string,
 ) {
-  const all = await getBookings();
-  for (const b of all) {
-    if (
-      b.labId === labId &&
-      b.instrumentId === instrumentId &&
-      b.subSlotId === subSlotId &&
-      b.userId === userId
-    ) {
-      await cancelBooking(b.id);
-    }
-  }
+  await dbCancelBookingsBySubSlot(labId, instrumentId, subSlotId, userId);
 }
 
 // ── Queries ──────────────────────────────────────────────────────────────────
