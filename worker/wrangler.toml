@@ -1,0 +1,10 @@
+name = "lab-booking-api"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+FEISHU_APP_ID = "cli_aaa50174943a1cba"
+FEISHU_APP_SECRET = "见下方说明，用 wrangler secret 设置"
+FEISHU_BASE_TOKEN = "PZZwbEHRZa4uaPsgUUwc7qJCnhG"
+FEISHU_TABLE_USERS = "tbl8MdOrJYDcLaF8"
+FEISHU_TABLE_BOOKINGS = "tblfax0UiTK8SEhO"
